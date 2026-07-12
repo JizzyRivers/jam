@@ -53,25 +53,77 @@ reapply_wan_block() {
     return 0
 }
 
+# Retries a transient adb command a few times before giving up -- this USB
+# link is known to drop mid-command intermittently (adb reporting "no
+# devices/emulators found" or "error: closed" for no real reason). Used for
+# every adb call between lifting the WAN block and re-applying it, since a
+# `set -e` exit in that window would otherwise leave the device unblocked.
+adb_retry() {
+    local tries=0
+    until "$@" </dev/null; do
+        tries=$((tries + 1))
+        if [[ "$tries" -ge 8 ]]; then
+            return 1
+        fi
+        yellow "  (adb hiccup, retrying: $* -- attempt $tries/8)"
+        sleep 3
+    done
+    return 0
+}
+
+# Safety net: if this script exits for ANY reason (crashed adb call under
+# set -e, Ctrl-C, whatever) after the WAN block has been lifted but before
+# the deliberate re-apply near the end, re-apply it on the way out instead
+# of silently leaving the device unblocked. Sourcing wan-block.sh directly
+# (not the deliberate reapply_wan_block flow) since the trap can fire from
+# a context where we don't know if the reboot/logs section ever ran.
+WAN_BLOCK_SAFETY_NET=0
+ensure_wan_block_on_exit() {
+    local rc=$?
+    if [[ "$WAN_BLOCK_SAFETY_NET" -eq 1 ]]; then
+        red "Unexpected exit while the WAN block was lifted -- re-applying as a safety net."
+        reapply_wan_block || true
+    fi
+    exit "$rc"
+}
+trap ensure_wan_block_on_exit EXIT
+
 [[ -t 1 ]] && clear
 bold "╔══════════════════════════════════════════╗"
 bold "║        Echo Dot Wake Word Switcher        ║"
 bold "╚══════════════════════════════════════════╝"
 echo
 
+# This USB link drops mid-command intermittently; retry these read-only
+# pre-flight checks a few times before concluding the device really isn't
+# there, rather than dying on the first hiccup.
+adb_out_retry() {
+    local tries=0 out
+    while true; do
+        out=$("$@" </dev/null 2>/dev/null | tr -d '\r\0')
+        if [[ -n "$out" ]]; then
+            printf '%s' "$out"
+            return 0
+        fi
+        tries=$((tries + 1))
+        [[ "$tries" -ge 5 ]] && return 1
+        sleep 2
+    done
+}
+
 echo "Checking for device..."
-ADB_STATE=$(adb get-state 2>/dev/null </dev/null || true)
+ADB_STATE=$(adb_out_retry adb get-state || true)
 [[ "$ADB_STATE" == "device" ]] || die "no adb device detected. Plug in the Echo and unlock/authorize it first."
 
-SERIAL=$(adb get-serialno 2>/dev/null </dev/null || echo "unknown")
+SERIAL=$(adb_out_retry adb get-serialno || echo "unknown")
 green "  connected: $SERIAL"
 
-CTX=$(adb shell 'cat /proc/self/attr/current 2>/dev/null' </dev/null | tr -d '\r\0')
+CTX=$(adb_out_retry adb shell 'cat /proc/self/attr/current 2>/dev/null')
 [[ "$CTX" == "u:r:su:s0" ]] || die "adb shell context is '$CTX', expected u:r:su:s0 (root). Is this the HA/Wyoming boot image?"
 green "  root context confirmed"
 echo
 
-CURRENT=$(adb shell "settings get secure $SETTING_KEY" 2>/dev/null </dev/null | tr -d '\r')
+CURRENT=$(adb_out_retry adb shell "settings get secure $SETTING_KEY")
 bold "Current wake word: ${CURRENT:-<unknown>}"
 echo
 
@@ -119,16 +171,30 @@ fi
 
 echo "Lifting WAN block for the entitlement check..."
 "$WANBLOCK" enable >/dev/null 2>&1 || true   # ensure known state first (idempotent)
-"$WANBLOCK" disable
 
-adb push "$TMP_XML" /data/local/tmp/wwip_new.xml >/dev/null </dev/null
-adb shell "cp /data/local/tmp/wwip_new.xml $PREFS_FILE; restorecon $PREFS_FILE" </dev/null
+DISABLE_TRIES=0
+until "$WANBLOCK" disable; do
+    DISABLE_TRIES=$((DISABLE_TRIES + 1))
+    if [[ "$DISABLE_TRIES" -ge 5 ]]; then
+        die "could not lift the WAN block after $DISABLE_TRIES attempts (adb link too unstable right now)"
+    fi
+    yellow "wan-block disable failed (attempt $DISABLE_TRIES/5), retrying in 4s..."
+    sleep 4
+done
+WAN_BLOCK_SAFETY_NET=1   # from here on, any unexpected exit must re-block
+
+adb_retry adb push "$TMP_XML" /data/local/tmp/wwip_new.xml >/dev/null \
+    || die "could not push updated wakeword cache after retries (WAN block will be re-applied)"
+adb_retry adb shell "cp /data/local/tmp/wwip_new.xml $PREFS_FILE; restorecon $PREFS_FILE" \
+    || die "could not install updated wakeword cache after retries (WAN block will be re-applied)"
 rm -f "$TMP_XML"
-adb shell "settings put secure $SETTING_KEY $CHOICE" >/dev/null </dev/null
+adb_retry adb shell "settings put secure $SETTING_KEY $CHOICE" >/dev/null \
+    || die "could not set secure setting after retries (WAN block will be re-applied)"
 
 echo "Rebooting to apply..."
 adb logcat -c 2>/dev/null </dev/null || true
-adb reboot </dev/null
+adb_retry adb reboot \
+    || die "could not issue reboot after retries (WAN block will be re-applied)"
 
 # ---------------------------------------------------------------------------
 # 2. Wait for the device to come back, then poll for the DAVS result.
@@ -169,29 +235,51 @@ while [[ "$WAITED" -lt "$DAVS_TIMEOUT_S" ]]; do
     fi
 done
 
+# A word that was already authorized on a previous run doesn't necessarily
+# re-emit setCurrentWakeWordModel on a later switch back to it -- there's no
+# fresh DAVS activation needed since it's already cached as valid. If we
+# timed out above with no explicit denial either, check the actual
+# persisted state directly rather than reporting a false "timed out".
+if [[ "$RESULT" == "timeout" ]]; then
+    PERSISTED=$(adb_out_retry adb shell "settings get secure $SETTING_KEY" || true)
+    if [[ "$PERSISTED" == "$CHOICE" ]]; then
+        RESULT="already-active"
+    fi
+fi
+
 # ---------------------------------------------------------------------------
 # 3. Always re-apply the WAN block, regardless of what happened above.
 # ---------------------------------------------------------------------------
 echo
 echo "Re-applying WAN block..."
 reapply_wan_block
+WAN_BLOCK_SAFETY_NET=0   # deliberately re-applied above; the trap no longer needs to
 
 echo
 case "$RESULT" in
     authorized)
         green "SUCCESS: '$CHOICE' passed the entitlement check and should now work offline."
         ;;
+    already-active)
+        green "SUCCESS: '$CHOICE' is set and persisted (was already authorized from a previous switch,"
+        green "so no fresh activation log was expected this time)."
+        ;;
     denied)
         red "DENIED: Amazon rejected '$CHOICE' for this account/device (not just an offline artifact)."
         yellow "Reverting to the previous wake word ('$CURRENT')."
         REVERT_XML=$(mktemp)
         echo "$CURRENT_XML" > "$REVERT_XML"
-        adb push "$REVERT_XML" /data/local/tmp/wwip_revert.xml >/dev/null </dev/null
-        adb shell "cp /data/local/tmp/wwip_revert.xml $PREFS_FILE; restorecon $PREFS_FILE" </dev/null
-        adb shell "settings put secure $SETTING_KEY $CURRENT" >/dev/null </dev/null
-        rm -f "$REVERT_XML"
-        adb reboot </dev/null
-        yellow "Rebooting back to '$CURRENT'."
+        if adb_retry adb push "$REVERT_XML" /data/local/tmp/wwip_revert.xml >/dev/null \
+            && adb_retry adb shell "cp /data/local/tmp/wwip_revert.xml $PREFS_FILE; restorecon $PREFS_FILE" \
+            && adb_retry adb shell "settings put secure $SETTING_KEY $CURRENT" >/dev/null; then
+            rm -f "$REVERT_XML"
+            adb_retry adb reboot || yellow "reboot command failed after retries -- reboot manually to apply the revert"
+            yellow "Rebooting back to '$CURRENT'."
+        else
+            rm -f "$REVERT_XML"
+            red "Could not revert after retries -- wake word may still be set to '$CHOICE' (denied by Amazon)."
+            yellow "WAN block is still safely re-applied regardless. Re-run this script to retry the revert."
+        fi
         ;;
     timeout)
         yellow "TIMED OUT waiting for a definitive result after ${DAVS_TIMEOUT_S}s."
