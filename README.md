@@ -144,13 +144,10 @@ following would be possible without them:
 
 **Amonet-Biscuit** (the bootloader unlock exploit for this device):
 
-- **@k4y0z** — did all the initial heavy lifting and created the first
-  port of Amonet for this device.
+- **@k4y0z**
 - **@Rortiz2**
 
 **Additional thanks:**
 
-- **@xyz** — for the original Amonet exploit for karnak, making all of
-  this possible in the first place.
-- **AntiEngineer** — for development board setup, finding the correct
-  pins, and getting UART working during the Biscuit port.
+- **@xyz**
+- **AntiEngineer**
