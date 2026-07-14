@@ -106,6 +106,23 @@ force a fresh read. Since `adb` runs over USB here, changing WiFi never risks
 losing the connection to the device itself. A timestamped backup of the
 previous config is kept on-device before writing the new one.
 
+## Fix Flaky USB/adb (host-side)
+
+```bash
+./fix-adb-udev.sh
+```
+
+If `adb` connects for a few seconds, drops, then reconnects on repeat --
+but the same cable/port is rock solid in TWRP -- this is usually your
+computer's `libmtp` udev rules grabbing the device and knocking it out of
+ADB mode. Unlike every other Jam script, this one runs **on your computer**,
+not the Echo -- it doesn't touch adb/the device at all.
+
+It walks you through `lsusb` to find the Echo's vendor:product ID (this
+varies per device/host, so you pick the right line), then adds an explicit
+udev rule excluding that ID from `libmtp` and reloads udev rules. Requires
+sudo. Unplug and replug the Echo after running it.
+
 ## Quick Check
 
 Run `./jam.sh` and pick **Quick health check**, or manually:

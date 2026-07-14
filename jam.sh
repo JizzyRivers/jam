@@ -309,7 +309,8 @@ main_menu() {
         echo "  6) WAN block: disable"
         echo "  7) WAN block: status"
         echo "  8) Quick health check"
-        echo "  9) Quit"
+        echo "  9) Fix flaky USB/adb connection (host-side)"
+        echo "  10) Quit"
         echo
         read_menu "#? "
         case "$REPLY_CHOICE" in
@@ -321,7 +322,8 @@ main_menu() {
             6) run_step "$SCRIPT_DIR/wan-block.sh" disable; pause ;;
             7) run_step "$SCRIPT_DIR/wan-block.sh" status; pause ;;
             8) health_check; pause ;;
-            9) echo "bye"; exit 0 ;;
+            9) run_step "$SCRIPT_DIR/fix-adb-udev.sh"; pause ;;
+            10) echo "bye"; exit 0 ;;
             *) yellow "unrecognized option"; sleep 1 ;;
         esac
     done
