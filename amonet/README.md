@@ -6,6 +6,8 @@ plus whatever stock firmware / `f1r30s.zip` you're using. Jam's `amonet`
 menu just calls into whatever you put here and walks you through the manual
 hardware steps in between; it doesn't include or redistribute Amonet itself.
 
+Source thread: [Amonet-Biscuit on XDA](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
+
 Place these here (from the Amonet project, however you obtained it):
 
 ```

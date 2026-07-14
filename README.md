@@ -160,6 +160,7 @@ following would be possible without them:
 - **kirkkirki** — for the Wyoming package itself.
 
 **Amonet-Biscuit** (the bootloader unlock exploit for this device):
+[XDA thread](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/)
 
 - **@k4y0z**
 - **@Rortiz2**
