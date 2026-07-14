@@ -156,6 +156,7 @@ Jam is just a menu wrapped around other people's work. None of the
 following would be possible without them:
 
 **Wyoming Package** (on-device Wyoming Satellite + Sendspin player):
+[Download post](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/page-9#post-90631621)
 
 - **kirkkirki** — for the Wyoming package itself.
 

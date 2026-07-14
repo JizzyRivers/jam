@@ -6,6 +6,9 @@ Sendspin player project). Jam's `wyomingpackage` menu just calls into
 whatever you put here; it doesn't include or redistribute that project
 itself, since it isn't Jam's work to redistribute.
 
+Download it from kirkkirki's post here:
+[XDA post with the Wyoming package](https://xdaforums.com/t/unlock-root-twrp-unbrick-amazon-echo-dot-2nd-gen-2016-biscuit.4761416/page-9#post-90631621)
+
 Place these here (from that project, however you obtained it):
 
 ```
