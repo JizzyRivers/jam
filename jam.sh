@@ -214,29 +214,41 @@ amonet_menu() {
             5)
                 echo
                 bold "Waiting for TWRP:"
-                echo "  Download your chosen stock firmware zip plus f1r30s.zip and place"
-                echo "  both in the amonet/ directory (see amonet/README.md), then continue"
-                echo "  to option 6."
+                echo "  Download your chosen stock firmware (.zip or .bin -- update.bin is"
+                echo "  picked up automatically if present) plus f1r30s.zip, and place both"
+                echo "  in the amonet/ directory (see amonet/README.md), then continue to"
+                echo "  option 6."
                 pause
                 ;;
             6)
                 echo
                 if ! check_adb; then pause; continue; fi
-                read -r -p "Stock firmware zip filename (in amonet/): " FW_ZIP
-                if [[ -z "$FW_ZIP" ]]; then yellow "cancelled."; pause; continue; fi
-                if ! require_file "$AMONET_DIR/$FW_ZIP" "amonet/README.md"; then pause; continue; fi
+                # Stock firmware can be supplied as either a .zip or a .bin
+                # (some vendors ship OTA packages named update.bin). Look
+                # for update.bin first as the common default; if it's not
+                # there, ask for whatever the user actually named their
+                # firmware file rather than assuming an extension.
+                if [[ -f "$AMONET_DIR/update.bin" ]]; then
+                    FW_FILE="update.bin"
+                    green "Found $AMONET_DIR/update.bin -- using it."
+                else
+                    yellow "No update.bin found in amonet/."
+                    read -r -p "Full filename of the stock firmware to flash (in amonet/, .zip or .bin): " FW_FILE
+                fi
+                if [[ -z "${FW_FILE:-}" ]]; then yellow "cancelled."; pause; continue; fi
+                if ! require_file "$AMONET_DIR/$FW_FILE" "amonet/README.md"; then pause; continue; fi
                 if ! require_file "$AMONET_DIR/f1r30s.zip" "amonet/README.md"; then pause; continue; fi
                 echo
-                yellow "This wipes data and cache, then installs both zips. Continuing..."
+                yellow "This wipes data and cache, then installs both packages. Continuing..."
                 adb shell "twrp wipe data" </dev/null
                 adb shell "twrp wipe cache" </dev/null
                 adb push "$AMONET_DIR/f1r30s.zip" /sdcard/ </dev/null
                 adb shell "twrp sideload" </dev/null &
                 sleep 2
-                adb sideload "$AMONET_DIR/$FW_ZIP" </dev/null
+                adb sideload "$AMONET_DIR/$FW_FILE" </dev/null
                 adb shell "twrp install /sdcard/f1r30s.zip" </dev/null
                 echo
-                yellow "Success = LED pulses green after each zip installs. Reboot when ready --"
+                yellow "Success = LED pulses green after each package installs. Reboot when ready --"
                 yellow "adb is forcibly enabled by the exploit, so it'll be reachable once booted."
                 pause
                 ;;
