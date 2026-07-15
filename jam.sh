@@ -143,12 +143,53 @@ wyoming_menu() {
                 echo
                 if require_file "$WYOMING_DIR/flash-ha-wyoming-boot.sh" "wyomingpackage/README.md"; then
                     (cd "$WYOMING_DIR" && ./flash-ha-wyoming-boot.sh)
+                    echo
+                    bold "Verifying the flash actually took..."
+                    yellow "(Known failure mode: the boot image sometimes doesn't stick, and the"
+                    yellow "device boots into what looks like normal setup mode but with adb"
+                    yellow "disabled. Checking now so we catch that BEFORE you spend time on the"
+                    yellow "Alexa app setup, instead of after.)"
+                    echo "Waiting for adb to come up (up to 90s)..."
+                    FLASH_VERIFIED=0
+                    FLASH_WAITED=0
+                    while [[ "$FLASH_WAITED" -lt 90 ]]; do
+                        sleep 5
+                        FLASH_WAITED=$((FLASH_WAITED + 5))
+                        if [[ "$(adb get-state 2>/dev/null </dev/null || true)" == "device" ]]; then
+                            FLASH_VERIFIED=1
+                            break
+                        fi
+                    done
+                    echo
+                    if [[ "$FLASH_VERIFIED" -eq 1 ]]; then
+                        green "adb is up after ${FLASH_WAITED}s -- the flash took. Safe to proceed"
+                        green "to option 6 (Alexa app setup)."
+                    else
+                        red "=========================================================="
+                        red " WARNING: adb never came up after ${FLASH_WAITED}s."
+                        red " This is the KNOWN failure mode -- the boot image did NOT"
+                        red " properly take, even if the device looks fully booted into"
+                        red " setup mode."
+                        red "=========================================================="
+                        yellow "Do NOT proceed to option 6 yet -- it will very likely end the"
+                        yellow "same way: fully booted, no adb, stuck in setup with nothing to"
+                        yellow "do about it from there."
+                        echo
+                        bold "Recovery (the bootloader unlock is fine -- no need to redo Amonet):"
+                        echo "  1. Unplug the device, reconnect it, wait ~3s after the blue LED,"
+                        echo "     then hold the action (circle) button ~5s to re-enter rainbow"
+                        echo "     fastboot."
+                        echo "  2. Re-run this option (5) to reflash, and let this check run again."
+                    fi
                 fi
-                echo
-                yellow "The Echo will boot up. Wait until it's in setup mode before continuing."
                 pause
                 ;;
             6)
+                echo
+                red "Before doing this: confirm option 5 reported adb came up successfully"
+                red "after the flash. If you skipped that check or aren't sure, go back and"
+                red "re-run option 5 first -- doing the Alexa app setup on a device where the"
+                red "boot image didn't take will just end in a stuck, adb-less setup screen."
                 echo
                 bold "Using the Alexa app once:"
                 echo "  1. Connect the Echo to Wi-Fi."

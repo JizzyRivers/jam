@@ -42,6 +42,20 @@ relevant README instead of failing with a raw "no such file."
 4. **Wake word switcher / WiFi credentials** (main menu) — change either any
    time afterward, without ever touching the Alexa app again.
 
+**Known failure mode:** the HA/Wyoming boot image occasionally doesn't
+properly take when flashed — the device still boots and looks completely
+normal (lands in Amazon's Alexa-app setup screen like it's supposed to),
+but adb never comes up because the image didn't actually force-enable it.
+If you proceed to the Alexa app setup at that point, you end up stuck: a
+fully set-up device with no adb, no way to run the installer, nothing to
+do except start over. **Recovery does not require redoing the Amonet
+unlock** — the bootloader unlock is a persistent, one-time hardware
+change. Just re-enter rainbow fastboot manually (unplug, reconnect, wait
+~3s after the blue LED, hold the action button ~5s) and reflash. Option 5
+in the Wyoming Package submenu now verifies adb actually comes up after
+flashing (polls for up to 90s) and will tell you clearly if it didn't,
+*before* you waste time on the Alexa app setup.
+
 ## WAN Blocking
 
 ```bash
