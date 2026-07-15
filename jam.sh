@@ -49,15 +49,28 @@ read_menu() {
     fi
 }
 
+# $1 (optional): which adb state(s) count as "connected", space-separated.
+# Defaults to "device" (normal booted OS). `adb get-state` reports different
+# strings depending on what mode the Echo is actually in -- "device" when
+# booted normally, "recovery" when it's sitting in TWRP, "sideload" mid-
+# sideload. A step that specifically needs TWRP (like the Amonet firmware
+# flash) must accept "recovery", not just "device", or it'll wrongly report
+# "no device" even though adb can see it fine.
 check_adb() {
+    local wanted="${1:-device}"
     command -v adb >/dev/null || { red "adb not in PATH."; return 1; }
     local state
     state=$(adb get-state 2>/dev/null </dev/null || true)
-    if [[ "$state" != "device" ]]; then
-        red "No adb device detected. Plug in the Echo and unlock/authorize it first."
-        return 1
+    for w in $wanted; do
+        [[ "$state" == "$w" ]] && return 0
+    done
+    red "No adb device in an expected state (got: '${state:-<none>}', wanted: $wanted)."
+    if [[ "$wanted" == *recovery* ]]; then
+        yellow "Make sure the Echo is booted into TWRP (constantly blinking cyan LED)."
+    else
+        yellow "Plug in the Echo and unlock/authorize it first."
     fi
-    return 0
+    return 1
 }
 
 # Checks that a user-supplied file exists before trying to use it, pointing
@@ -222,7 +235,7 @@ amonet_menu() {
                 ;;
             6)
                 echo
-                if ! check_adb; then pause; continue; fi
+                if ! check_adb recovery; then pause; continue; fi
                 # Stock firmware can be supplied as either a .zip or a .bin
                 # (some vendors ship OTA packages named update.bin). Look
                 # for update.bin first as the common default; if it's not
@@ -239,7 +252,11 @@ amonet_menu() {
                 if ! require_file "$AMONET_DIR/$FW_FILE" "amonet/README.md"; then pause; continue; fi
                 if ! require_file "$AMONET_DIR/f1r30s.zip" "amonet/README.md"; then pause; continue; fi
                 echo
-                yellow "This wipes data and cache, then installs both packages. Continuing..."
+                red "This WIPES data and cache, then installs $FW_FILE + f1r30s.zip. This cannot be undone."
+                read -r -p "Type 'yes' to continue: " CONFIRM_WIPE
+                if [[ "$CONFIRM_WIPE" != "yes" ]]; then yellow "cancelled -- nothing was touched."; pause; continue; fi
+                echo
+                yellow "Continuing..."
                 adb shell "twrp wipe data" </dev/null
                 adb shell "twrp wipe cache" </dev/null
                 adb push "$AMONET_DIR/f1r30s.zip" /sdcard/ </dev/null
@@ -316,10 +333,20 @@ health_check() {
 main_menu() {
     while true; do
         banner
-        if check_adb; then
-            local serial
-            serial=$(adb get-serialno 2>/dev/null </dev/null)
-            green "Connected: $serial"
+        if command -v adb >/dev/null; then
+            local state serial
+            state=$(adb get-state 2>/dev/null </dev/null || true)
+            if [[ -n "$state" ]]; then
+                serial=$(adb get-serialno 2>/dev/null </dev/null)
+                case "$state" in
+                    device)   green  "Connected: $serial (booted)" ;;
+                    recovery) yellow "Connected: $serial (TWRP recovery)" ;;
+                    sideload) yellow "Connected: $serial (TWRP sideload)" ;;
+                    *)        yellow "Connected: $serial (state: $state)" ;;
+                esac
+            else
+                red "No adb device detected."
+            fi
         fi
         echo
         echo "  1) Amonet unlock (submenu)"
