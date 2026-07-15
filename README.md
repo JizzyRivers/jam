@@ -73,6 +73,15 @@ server, or upstream DNS cooperation required, unlike network-level tricks
 it's baked into `firewall.sh` itself, which the boot image re-runs from
 scratch (`--flush` + rebuild) on every boot.
 
+Also locks down IPv6 output entirely (policy `DROP`, loopback excepted).
+Stock `firewall.sh` only ever touches `iptables` (IPv4) — IPv6 is left at
+its default `ACCEPT` forever, so a device with a live IPv6 address on
+`wlan0` (common on most home networks) would otherwise have Alexa's cloud
+calls sail right past an IPv4-only block. Nothing here needs IPv6 (HA,
+Wyoming, and Sendspin are all reached over IPv4 LAN). `./wan-block.sh
+status` detects and flags a device still running an older IPv4-only block
+as "outdated"; running `enable` again upgrades it in place.
+
 Note: the stock Amazon speech stack (`amazon.speech.sim` and friends) keeps
 running alongside the Wyoming satellite rather than being replaced by it —
 this is by design, not a bug. It's what wakes on the configured word in the
