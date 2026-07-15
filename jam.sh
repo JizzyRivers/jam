@@ -327,13 +327,20 @@ amonet_menu() {
                 adb shell "twrp wipe data" </dev/null
                 adb shell "twrp wipe cache" </dev/null
                 adb push "$AMONET_DIR/f1r30s.zip" /sdcard/ </dev/null
+                echo
+                bold "[1/2] Installing $FW_FILE via sideload..."
                 adb shell "twrp sideload" </dev/null &
                 sleep 2
                 adb sideload "$AMONET_DIR/$FW_FILE" </dev/null
+                yellow "Watch for the LED to pulse green now (confirms $FW_FILE installed)."
+                read -r -p "Saw the green pulse? Press enter to continue to f1r30s.zip..." _
+                echo
+                bold "[2/2] Installing f1r30s.zip..."
                 adb shell "twrp install /sdcard/f1r30s.zip" </dev/null
                 echo
-                yellow "Success = LED pulses green after each package installs. Reboot when ready --"
-                yellow "adb is forcibly enabled by the exploit, so it'll be reachable once booted."
+                yellow "Watch for a second green pulse now (confirms f1r30s.zip installed)."
+                yellow "Reboot when ready -- adb is forcibly enabled by the exploit, so it'll"
+                yellow "be reachable once booted."
                 pause
                 ;;
             7)
