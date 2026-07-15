@@ -254,13 +254,22 @@ amonet_menu() {
                 ;;
             7)
                 echo
-                if check_adb; then
-                    adb reboot recovery </dev/null
-                else
-                    yellow "No adb device. Manual options:"
-                    echo "  - Unplug, reconnect, hold the mute button ~5s once the blue LED appears."
-                    echo "  - In hacked fastboot: fastboot oem reboot-recovery"
+                bold "Boot to TWRP recovery:"
+                echo "  1. Unplug the device from USB/power now."
+                echo "  2. This will run boot-recovery.sh -- once it's running and waiting,"
+                echo "     connect the device to your PC."
+                echo
+                if require_file "$AMONET_DIR/boot-recovery.sh" "amonet/README.md"; then
+                    read -r -p "Device unplugged? Press enter to run boot-recovery.sh..." _
+                    (cd "$AMONET_DIR" && sudo ./boot-recovery.sh)
+                    echo
+                    yellow "Success = constantly blinking cyan LED (TWRP)."
                 fi
+                echo
+                yellow "If that didn't work, follow the manual instructions instead:"
+                echo "  Unplug the device, reconnect it, and as soon as the blue LED"
+                echo "  appears, press and hold the mute (microphone) button for about"
+                echo "  5 seconds."
                 pause
                 ;;
             8)
