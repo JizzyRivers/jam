@@ -202,7 +202,34 @@ wyoming_menu() {
             7)
                 echo
                 if require_file "$WYOMING_DIR/install.sh" "wyomingpackage/README.md"; then
-                    (cd "$WYOMING_DIR" && ./install.sh)
+                    # install.sh is third-party (not Jam's own work -- we
+                    # don't edit it) and uses `set -euo pipefail`, so it dies
+                    # immediately on the first transient adb/USB hiccup
+                    # instead of retrying. Retry the whole run here instead,
+                    # since its steps (stop service, remount, push, etc) are
+                    # safe to redo from scratch.
+                    if ! check_adb; then pause; continue; fi
+                    INSTALL_OK=0
+                    for attempt in 1 2 3; do
+                        if (cd "$WYOMING_DIR" && ./install.sh); then
+                            INSTALL_OK=1
+                            break
+                        fi
+                        yellow "install.sh failed on attempt $attempt/3 (often just a transient adb/USB drop)."
+                        if [[ "$attempt" -lt 3 ]]; then
+                            yellow "Waiting for the connection to settle before retrying..."
+                            sleep 4
+                            if ! check_adb; then
+                                red "Device unreachable -- can't safely retry. Check the cable/connection and re-run option 7."
+                                break
+                            fi
+                        fi
+                    done
+                    if [[ "$INSTALL_OK" -ne 1 ]]; then
+                        red "install.sh did not complete after 3 attempts."
+                        yellow "Re-run option 7 once the connection looks stable (see the status line"
+                        yellow "on the main menu)."
+                    fi
                 fi
                 pause
                 ;;
@@ -329,16 +356,85 @@ amonet_menu() {
                 adb push "$AMONET_DIR/f1r30s.zip" /sdcard/ </dev/null
                 echo
                 bold "[1/2] Installing $FW_FILE via sideload..."
-                adb shell "twrp sideload" </dev/null &
-                sleep 2
-                adb sideload "$AMONET_DIR/$FW_FILE" </dev/null
+                # adb sideload negotiates a special one-shot sideload adbd on
+                # TWRP's end (started here via the backgrounded "twrp
+                # sideload" shell command). It can drop mid-transfer on a
+                # flaky USB link -- retry the whole handshake rather than a
+                # single-shot attempt, and DO NOT continue to f1r30s.zip
+                # unless this genuinely succeeded (patching f1r30s.zip on
+                # top of a half-written base image is how we've bricked the
+                # adb-never-comes-up state before).
+                SIDELOAD_OK=0
+                for attempt in 1 2 3; do
+                    adb shell "twrp sideload" </dev/null &
+                    SIDELOAD_SHELL_PID=$!
+                    sleep 2
+                    if adb sideload "$AMONET_DIR/$FW_FILE" </dev/null; then
+                        wait "$SIDELOAD_SHELL_PID" 2>/dev/null || true
+                        SIDELOAD_OK=1
+                        break
+                    fi
+                    wait "$SIDELOAD_SHELL_PID" 2>/dev/null || true
+                    yellow "  sideload attempt $attempt/3 failed."
+                    if [[ "$attempt" -lt 3 ]]; then
+                        yellow "  waiting for TWRP to settle before retrying..."
+                        sleep 4
+                        if ! check_adb "recovery sideload"; then
+                            red "Device unreachable -- can't safely retry. Check the cable/LED and re-run option 6."
+                            break
+                        fi
+                    fi
+                done
+                if [[ "$SIDELOAD_OK" -ne 1 ]]; then
+                    red "FAILED: $FW_FILE did not install after 3 attempts."
+                    red "Stopping here -- NOT installing f1r30s.zip on top of a failed/partial base flash."
+                    yellow "Re-run option 6 from scratch once the device is reliably reachable."
+                    pause
+                    continue
+                fi
                 yellow "Watch for the LED to pulse green now (confirms $FW_FILE installed)."
                 read -r -p "Saw the green pulse? Press enter to continue to f1r30s.zip..." _
                 echo
                 bold "[2/2] Installing f1r30s.zip..."
-                adb shell "twrp install /sdcard/f1r30s.zip" </dev/null
+                # TWRP drops back to its normal (non-sideload) adbd once the
+                # sideload above completes, and needs a moment to actually
+                # settle into that state before it'll accept a shell command
+                # -- firing "twrp install" immediately can race and fail with
+                # a transient "no devices" even though the device is fine.
+                # Poll for "recovery" state, then retry the install itself.
+                RECOVERY_READY=0
+                for wait_attempt in 1 2 3 4 5; do
+                    if check_adb recovery 2>/dev/null; then RECOVERY_READY=1; break; fi
+                    sleep 2
+                done
+                if [[ "$RECOVERY_READY" -ne 1 ]]; then
+                    red "Device never settled back into recovery state after the sideload."
+                    yellow "Check the cable/LED, then install f1r30s.zip manually:"
+                    yellow "  adb shell \"twrp install /sdcard/f1r30s.zip\""
+                    pause
+                    continue
+                fi
+                INSTALL_OK=0
+                for attempt in 1 2 3; do
+                    if adb shell "twrp install /sdcard/f1r30s.zip" </dev/null; then
+                        INSTALL_OK=1
+                        break
+                    fi
+                    yellow "  twrp install attempt $attempt/3 failed, retrying..."
+                    sleep 3
+                done
+                if [[ "$INSTALL_OK" -ne 1 ]]; then
+                    red "FAILED: f1r30s.zip did not install after 3 attempts."
+                    yellow "adb (force-enable) will NOT work reliably until this succeeds. Retry"
+                    yellow "manually: adb shell \"twrp install /sdcard/f1r30s.zip\""
+                    pause
+                    continue
+                fi
                 echo
                 yellow "Watch for a second green pulse now (confirms f1r30s.zip installed)."
+                yellow "Look for \"Done processing script file\" in the output above -- that's"
+                yellow "the real confirmation f1r30s.zip's patches (adb force-enable, dm-verity"
+                yellow "disable, OTA block) actually applied."
                 yellow "Reboot when ready -- adb is forcibly enabled by the exploit, so it'll"
                 yellow "be reachable once booted."
                 pause
