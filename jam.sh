@@ -113,7 +113,17 @@ wyoming_menu() {
         case "$REPLY_CHOICE" in
             5)
                 echo
-                yellow "From rainbow fastboot:"
+                bold "Get into rainbow fastboot:"
+                if check_adb; then
+                    echo "  Rebooting the device now..."
+                    adb reboot </dev/null
+                else
+                    yellow "  No adb device in normal booted mode -- reboot it manually if needed."
+                fi
+                echo "  Wait for the blue ring, count to 3, then hold the circle (action)"
+                echo "  button to enter rainbow fastboot."
+                echo
+                read -r -p "In rainbow fastboot now? Press enter to flash..." _
                 echo
                 if require_file "$WYOMING_DIR/flash-ha-wyoming-boot.sh" "wyomingpackage/README.md"; then
                     (cd "$WYOMING_DIR" && ./flash-ha-wyoming-boot.sh)
