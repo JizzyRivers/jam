@@ -114,16 +114,32 @@ wyoming_menu() {
             5)
                 echo
                 bold "Get into rainbow fastboot:"
-                if check_adb; then
-                    echo "  Rebooting the device now..."
-                    adb reboot </dev/null
-                else
-                    yellow "  No adb device in normal booted mode -- reboot it manually if needed."
-                fi
-                echo "  Wait for the blue ring, count to 3, then hold the circle (action)"
-                echo "  button to enter rainbow fastboot."
-                echo
-                read -r -p "In rainbow fastboot now? Press enter to flash..." _
+                ADB_CUR_STATE=$(adb get-state 2>/dev/null </dev/null || true)
+                case "$ADB_CUR_STATE" in
+                    device)
+                        echo "  Rebooting the device now..."
+                        adb reboot </dev/null
+                        echo "  Wait for the blue ring, count to 3, then hold the circle (action)"
+                        echo "  button to enter rainbow fastboot."
+                        echo
+                        read -r -p "In rainbow fastboot now? Press enter to flash..." _
+                        ;;
+                    recovery)
+                        yellow "  Device is in TWRP -- plain 'adb reboot' doesn't work from here."
+                        echo "  Using 'adb shell reboot-amonet' instead, which jumps straight to"
+                        echo "  rainbow fastboot (no button-holding needed)."
+                        adb shell "reboot-amonet" </dev/null
+                        echo
+                        read -r -p "Press enter once you see the spinning rainbow LED ring..." _
+                        ;;
+                    *)
+                        yellow "  No adb device in a known state (got: '${ADB_CUR_STATE:-<none>}')."
+                        echo "  Enter fastboot manually: unplug, reconnect, wait for the blue ring,"
+                        echo "  count to 3, then hold the circle (action) button."
+                        echo
+                        read -r -p "In rainbow fastboot now? Press enter to flash..." _
+                        ;;
+                esac
                 echo
                 if require_file "$WYOMING_DIR/flash-ha-wyoming-boot.sh" "wyomingpackage/README.md"; then
                     (cd "$WYOMING_DIR" && ./flash-ha-wyoming-boot.sh)
