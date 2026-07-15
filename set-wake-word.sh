@@ -62,10 +62,10 @@ adb_retry() {
     local tries=0
     until "$@" </dev/null; do
         tries=$((tries + 1))
-        if [[ "$tries" -ge 8 ]]; then
+        if [[ "$tries" -ge 10 ]]; then
             return 1
         fi
-        yellow "  (adb hiccup, retrying: $* -- attempt $tries/8)"
+        yellow "  (adb hiccup, retrying: $* -- attempt $tries/10)"
         sleep 3
     done
     return 0
@@ -106,8 +106,8 @@ adb_out_retry() {
             return 0
         fi
         tries=$((tries + 1))
-        [[ "$tries" -ge 5 ]] && return 1
-        sleep 2
+        [[ "$tries" -ge 8 ]] && return 1
+        sleep 3
     done
 }
 
@@ -158,8 +158,8 @@ read -r -p "Set wake word to '$CHOICE'? [Y/n] " ans
 # ---------------------------------------------------------------------------
 echo
 echo "Reading current wakeword-info cache..."
-CURRENT_XML=$(adb shell "cat $PREFS_FILE" 2>/dev/null </dev/null | tr -d '\r')
-[[ -n "$CURRENT_XML" ]] || die "could not read $PREFS_FILE"
+CURRENT_XML=$(adb_out_retry adb shell "cat $PREFS_FILE" || true)
+[[ -n "$CURRENT_XML" ]] || die "could not read $PREFS_FILE after retries"
 
 TMP_XML=$(mktemp)
 echo "$CURRENT_XML" | sed -E "s/active_wakewords&quot;:\[&quot;[a-z]+&quot;\]/active_wakewords\&quot;:[\&quot;$CHOICE\&quot;]/" > "$TMP_XML"
@@ -192,7 +192,12 @@ adb_retry adb shell "settings put secure $SETTING_KEY $CHOICE" >/dev/null \
     || die "could not set secure setting after retries (WAN block will be re-applied)"
 
 echo "Rebooting to apply..."
-adb logcat -c 2>/dev/null </dev/null || true
+# A failed clear here (silently ignored before) risks a stale log line from
+# a previous successful switch to this same word producing a false-positive
+# "authorized" result on the very first poll below, before this attempt's
+# reboot has even landed. Retry it properly instead of shrugging it off.
+adb_retry adb logcat -c \
+    || yellow "could not clear the log buffer after retries -- entitlement check below may be less reliable"
 adb_retry adb reboot \
     || die "could not issue reboot after retries (WAN block will be re-applied)"
 
