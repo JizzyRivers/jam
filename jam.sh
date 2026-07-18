@@ -583,6 +583,33 @@ bluetooth_menu() {
 }
 
 # ---------------------------------------------------------------------------
+# WAN block
+# ---------------------------------------------------------------------------
+wan_block_menu() {
+    local script="$SCRIPT_DIR/wan-block.sh"
+    while true; do
+        banner
+        bold "-- WAN block --"
+        echo
+        run_step "$script" status
+        echo
+        echo "  1) Status"
+        echo "  2) Enable"
+        echo "  3) Disable"
+        echo "  0) Back"
+        echo
+        read_menu "#? "
+        case "$REPLY_CHOICE" in
+            1) run_step "$script" status; pause ;;
+            2) run_step "$script" enable; pause ;;
+            3) run_step "$script" disable; pause ;;
+            0|"") return ;;
+            *) yellow "unrecognized option"; sleep 1 ;;
+        esac
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Main menu
 # ---------------------------------------------------------------------------
 main_menu() {
@@ -604,18 +631,26 @@ main_menu() {
             fi
         fi
         echo
+        bold "  Setup"
         echo "  1) Amonet unlock (submenu)"
         echo "  2) Wyoming Package: install / reinstall (submenu)"
+        echo
+        bold "  Device configuration"
         echo "  3) WiFi credentials"
         echo "  4) Wake word switcher"
-        echo "  5) WAN block: enable"
-        echo "  6) WAN block: disable"
-        echo "  7) WAN block: status"
-        echo "  8) Quick health check"
-        echo "  9) Fix flaky USB/adb connection (host-side)"
-        echo "  10) ModemManager control (host-side, submenu)"
-        echo "  11) Bluetooth manager (submenu)"
-        echo "  12) Quit"
+        echo "  5) Bluetooth manager (submenu)"
+        echo
+        bold "  Network / security"
+        echo "  6) WAN block (submenu)"
+        echo
+        bold "  Diagnostics"
+        echo "  7) Quick health check"
+        echo
+        bold "  Host-side troubleshooting"
+        echo "  8) Fix flaky USB/adb connection"
+        echo "  9) ModemManager control (submenu)"
+        echo
+        echo "  10) Quit"
         echo
         read_menu "#? "
         case "$REPLY_CHOICE" in
@@ -623,14 +658,12 @@ main_menu() {
             2) wyoming_menu ;;
             3) run_step "$SCRIPT_DIR/wifi-credentials.sh"; pause ;;
             4) run_step "$SCRIPT_DIR/set-wake-word.sh"; pause ;;
-            5) run_step "$SCRIPT_DIR/wan-block.sh" enable; pause ;;
-            6) run_step "$SCRIPT_DIR/wan-block.sh" disable; pause ;;
-            7) run_step "$SCRIPT_DIR/wan-block.sh" status; pause ;;
-            8) health_check; pause ;;
-            9) run_step "$SCRIPT_DIR/fix-adb-udev.sh"; pause ;;
-            10) modemmanager_menu ;;
-            11) bluetooth_menu ;;
-            12) echo "bye"; exit 0 ;;
+            5) bluetooth_menu ;;
+            6) wan_block_menu ;;
+            7) health_check; pause ;;
+            8) run_step "$SCRIPT_DIR/fix-adb-udev.sh"; pause ;;
+            9) modemmanager_menu ;;
+            10) echo "bye"; exit 0 ;;
             *) yellow "unrecognized option"; sleep 1 ;;
         esac
     done
