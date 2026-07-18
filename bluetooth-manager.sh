@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
-# Manage Bluetooth on a de-Amazonized Echo Dot (HA/Wyoming boot image) --
-# the pieces that are actually shell-scriptable on this Android version.
+# Manage Bluetooth on a de-Amazonized Echo Dot (HA/Wyoming boot image).
 #
-# This build predates Android's `cmd`/`bluetoothctl`-style scriptable
-# Bluetooth interface -- there is no shell command to drive a NEW pairing
-# handshake here. What IS available and scriptable:
-#   - enable/disable the BT adapter (real broadcast actions the stock
-#     com.amazon.device.csmbluetooth.service already exposes)
-#   - list paired devices (read from the Bluedroid config file directly)
-#   - show current connection status (dumpsys bluetooth_manager)
-#   - disconnect / remove a paired device
-#
-# Pairing a brand-new device still has to go through the normal Alexa app
-# flow (or whatever OOBE path this device uses) -- that's not covered here.
+# This build (Android 5.1.1 / API 22) predates Android's `cmd`/
+# `bluetoothctl`-style scriptable Bluetooth interface, so there's no shell
+# command to drive scan/pair directly. bt-app/ is Jam's own tiny headless
+# companion app (BluetoothAdapter.startDiscovery()/BluetoothDevice.
+# createBond(), no UI -- the Echo has no screen anyway) that closes that
+# gap; scan/pair below drive it via `am startservice` (NOT `am broadcast` --
+# broadcasts to its receiver were reliably swallowed somewhere between
+# delivery and the receiver's onReceive(), confirmed live across repeated
+# attempts, while a direct startservice call reliably reached the app every
+# time). See bt-app/README or its source comments for why.
 #
 # Usage:
 #   ./bluetooth-manager.sh status
@@ -24,8 +22,15 @@
 #                                             # version has no per-device
 #                                             # disconnect shell command
 #   ./bluetooth-manager.sh remove <MAC>       # forget a paired device
+#   ./bluetooth-manager.sh install-app        # push/install bt-app/jam-bt.apk
+#   ./bluetooth-manager.sh scan               # ~12s discovery, prints found devices
+#   ./bluetooth-manager.sh pair <MAC>         # pair with a discovered device
 
 set -uo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+BT_APK="$SCRIPT_DIR/bt-app/jam-bt.apk"
+BT_PKG=com.jam.bt
 
 red()    { printf '\033[31m%s\033[0m\n' "$*"; }
 green()  { printf '\033[32m%s\033[0m\n' "$*"; }
@@ -100,32 +105,45 @@ do_list() {
     # bonding evidence, not mere presence in this cache.
     # Uses only sub()/gsub() (no gawk-only 3-arg match()) since busybox awk
     # is plain POSIX awk, not gawk.
+    #
+    # Nesting must be tracked by distinguishing a PURE opener/closer line
+    # (nothing else on it) from a single-line leaf that both opens and
+    # closes on the same line (e.g. "<N1 Tag=\"Timestamp\" ...>123</N1>").
+    # An earlier version treated any line ending in "</N#>" as the block's
+    # own closing tag -- which misfired on the very first leaf child inside
+    # a device's block (Timestamp always comes before Name/LinkKey), exiting
+    # before Name or LinkKey were ever seen. Confirmed live: a genuinely
+    # bonded device (with LinkKey) still printed nothing under that logic.
     echo "$xml" | busybox awk '
         function is_mac(s) {
             return s ~ /^[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]:[0-9a-fA-F][0-9a-fA-F]$/
         }
-        /Tag="[0-9a-fA-F:]+"/ && !in_dev {
+        !in_dev && /^[ \t]*<N[0-9]+ Tag="[0-9a-fA-F:]+">[ \t]*$/ {
             line = $0
             sub(/^.*Tag="/, "", line)
             sub(/".*$/, "", line)
             if (line != "Local" && is_mac(line)) {
-                mac = line
-                in_dev = 1
-                name = ""
-                bonded = 0
+                mac = line; in_dev = 1; depth = 1; name = ""; bonded = 0
                 next
             }
         }
-        in_dev && /Tag="Name"/ {
-            line = $0
-            sub(/^[^>]*>/, "", line)
-            sub(/<.*$/, "", line)
-            name = line
-        }
-        in_dev && /Tag="LinkKey"|Tag="LE_KEY_/ { bonded = 1 }
-        in_dev && /<\/N[0-9]+>$/ {
-            if (mac != "" && bonded) print mac"  "name
-            in_dev = 0; mac = ""; bonded = 0
+        in_dev {
+            if ($0 ~ /^[ \t]*<N[0-9]+ [^>]*>[ \t]*$/) { depth++; next }
+            if ($0 ~ /^[ \t]*<\/N[0-9]+>[ \t]*$/) {
+                depth--
+                if (depth == 0) {
+                    if (mac != "" && bonded) print mac"  "name
+                    in_dev = 0; mac = ""; bonded = 0
+                }
+                next
+            }
+            if ($0 ~ /Tag="Name"/) {
+                line = $0
+                sub(/^[^>]*>/, "", line)
+                sub(/<.*$/, "", line)
+                name = line
+            }
+            if ($0 ~ /Tag="LinkKey"/ || $0 ~ /Tag="LE_KEY_/) bonded = 1
         }
     ' 2>/dev/null
     echo "(only entries with real link-key material are shown -- this file also"
@@ -174,12 +192,21 @@ do_remove() {
     # merely SEEN during a scan (hundreds of entries on a typical Echo).
     # Only proceed if this device's own block actually has bond evidence
     # (a LinkKey/LE_KEY_* tag), matching do_list's stricter definition.
+    # Same pure-opener/pure-closer distinction as do_list (a single-line
+    # leaf like "<N1 Tag=\"Timestamp\" ...>123</N1>" must not be mistaken
+    # for the device block's own closing tag -- see do_list's comment).
     local block_is_bonded
     block_is_bonded=$(echo "$xml" | busybox awk -v mac="$mac" '
         BEGIN { IGNORECASE = 1 }
-        $0 ~ "Tag=\"" mac "\"" && !in_dev { in_dev = 1; next }
-        in_dev && /Tag="LinkKey"|Tag="LE_KEY_/ { print "yes"; exit }
-        in_dev && /<\/N[0-9]+>$/ { exit }
+        $0 ~ "Tag=\"" mac "\"" && !in_dev { in_dev = 1; depth = 1; next }
+        in_dev {
+            if ($0 ~ /Tag="LinkKey"/ || $0 ~ /Tag="LE_KEY_/) { print "yes"; exit }
+            if ($0 ~ /^[ \t]*<N[0-9]+ [^>]*>[ \t]*$/) { depth++; next }
+            if ($0 ~ /^[ \t]*<\/N[0-9]+>[ \t]*$/) {
+                depth--
+                if (depth == 0) exit
+            }
+        }
     ')
     if [[ "$block_is_bonded" != "yes" ]]; then
         die "$mac has been SEEN (scan cache) but was never actually bonded/paired -- nothing to remove"
@@ -191,12 +218,14 @@ do_remove() {
 
     local tmp
     tmp=$(mktemp)
+    # Same pure-opener/pure-closer distinction as do_list/block_is_bonded --
+    # a single-line leaf must not be mistaken for the block's own closer.
     echo "$xml" | busybox awk -v mac="$mac" '
         BEGIN { IGNORECASE = 1 }
         $0 ~ "Tag=\"" mac "\"" && !in_dev { in_dev = 1; depth = 1; next }
         in_dev {
-            if ($0 ~ /<N[0-9]+ [^\/]*>$/ && $0 !~ /<\/N[0-9]+>$/) depth++
-            if ($0 ~ /<\/N[0-9]+>$/) { depth--; if (depth == 0) { in_dev = 0; next } }
+            if ($0 ~ /^[ \t]*<N[0-9]+ [^>]*>[ \t]*$/) { depth++; next }
+            if ($0 ~ /^[ \t]*<\/N[0-9]+>[ \t]*$/) { depth--; if (depth == 0) { in_dev = 0 }; next }
             next
         }
         { print }
@@ -217,13 +246,67 @@ do_remove() {
     green "previous config is at $BT_CONFIG.orig.jam on-device if anything looks wrong."
 }
 
+do_install_app() {
+    [[ -f "$BT_APK" ]] || die "missing $BT_APK -- run bt-app/build.sh first (see bt-app/build.sh header for requirements)"
+    adb_retry adb install -r "$BT_APK" || die "install failed after retries"
+    green "Installed $BT_PKG."
+}
+
+require_app() {
+    local installed
+    installed=$(adb_out_retry adb shell "pm list packages $BT_PKG" || true)
+    if [[ "$installed" != *"$BT_PKG"* ]]; then
+        die "$BT_PKG isn't installed on the device -- run '$0 install-app' first"
+    fi
+}
+
+do_scan() {
+    require_app
+    yellow "Scanning for ~12s..."
+    adb shell 'logcat -c' </dev/null || true
+    adb_retry adb shell "am startservice -n $BT_PKG/.JamBtService -a $BT_PKG.SCAN" \
+        || die "could not start scan after retries"
+    sleep 13
+    local log
+    log=$(adb shell 'logcat -d -s JamBT:*' </dev/null | tr -d '\r')
+    if ! grep -q "SCAN_DONE" <<<"$log"; then
+        yellow "scan may not have finished cleanly -- showing whatever was captured:"
+    fi
+    bold "-- Found devices --"
+    grep "FOUND:" <<<"$log" | sed -E 's/.*FOUND: /  /' | sort -u -t' ' -k1,1
+}
+
+do_pair() {
+    local mac="${1:-}"
+    [[ -n "$mac" ]] || die "usage: $0 pair <MAC address>"
+    [[ "$mac" =~ ^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$ ]] || die "'$mac' doesn't look like a MAC address (expected AA:BB:CC:DD:EE:FF)"
+    require_app
+    yellow "Pairing with $mac..."
+    adb shell 'logcat -c' </dev/null || true
+    adb_retry adb shell "am startservice -n $BT_PKG/.JamBtService -a $BT_PKG.PAIR --es mac $mac" \
+        || die "could not start pairing after retries"
+    sleep 8
+    local log result
+    log=$(adb shell 'logcat -d -s JamBT:*' </dev/null | tr -d '\r')
+    result=$(grep "BOND_STATE: $mac ->" <<<"$log" | tail -1 | sed -E 's/.*-> //')
+    case "$result" in
+        BONDED)  green "Paired successfully with $mac." ;;
+        BONDING) yellow "Still bonding -- check './bluetooth-manager.sh list' shortly, or a PIN/confirmation may be needed on the speaker itself." ;;
+        NONE)    red "Pairing failed or was rejected by $mac." ;;
+        *)       yellow "No definitive result yet -- check './bluetooth-manager.sh list' or the log:"; echo "$log" | grep -i "$mac\|PAIR" ;;
+    esac
+}
+
 case "${1:-}" in
-    status)     do_status ;;
-    list)       do_list ;;
-    raw)        do_raw ;;
-    enable)     do_enable ;;
-    disable)    do_disable ;;
-    disconnect) do_disconnect ;;
-    remove)     do_remove "${2:-}" ;;
-    *) die "usage: $0 {status|list|raw|enable|disable|disconnect|remove <MAC>}" ;;
+    status)      do_status ;;
+    list)        do_list ;;
+    raw)         do_raw ;;
+    enable)      do_enable ;;
+    disable)     do_disable ;;
+    disconnect)  do_disconnect ;;
+    remove)      do_remove "${2:-}" ;;
+    install-app) do_install_app ;;
+    scan)        do_scan ;;
+    pair)        do_pair "${2:-}" ;;
+    *) die "usage: $0 {status|list|raw|enable|disable|disconnect|remove <MAC>|install-app|scan|pair <MAC>}" ;;
 esac

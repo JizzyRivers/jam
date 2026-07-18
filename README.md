@@ -119,15 +119,33 @@ This script automates the whole thing safely:
 
 ```bash
 ./bluetooth-manager.sh {status|list|raw|enable|disable|disconnect|remove <MAC>}
+./bluetooth-manager.sh install-app   # one-time: install bt-app/jam-bt.apk
+./bluetooth-manager.sh scan          # ~12s discovery, prints found devices
+./bluetooth-manager.sh pair <MAC>    # pair with a discovered device
 ```
 
-This Fire OS/Android version predates Android's scriptable Bluetooth
-interface (no `bluetoothctl`, no `cmd bluetooth`) — there's no shell command
-to drive a brand-new pairing handshake here, so pairing a new speaker still
-goes through the normal Alexa app flow. What this script covers instead:
-adapter enable/disable (real broadcast actions the stock
-`com.amazon.device.csmbluetooth.service` already exposes), listing devices
-actually bonded to this Echo, disconnecting, and removing a paired device.
+This Fire OS/Android version (5.1.1 / API 22) predates Android's scriptable
+Bluetooth interface — no `bluetoothctl`, no `cmd bluetooth`. `scan`/`pair`
+are driven by `bt-app/`, a tiny headless companion app that's Jam's own
+code (unlike Amonet/Wyoming, safe to bundle here): no UI (the Echo has no
+screen anyway), just a `Service` that calls the real
+`BluetoothAdapter.startDiscovery()`/`BluetoothDevice.createBond()` APIs in
+response to `am startservice` and logs results under the `JamBT` logcat
+tag. Run `install-app` once before `scan`/`pair` will work; see
+`bt-app/build.sh` to rebuild it from source.
+
+`scan`/`pair` talk to the app via `am startservice -n com.jam.bt/...`, not
+`am broadcast` — broadcasts to the app's `BroadcastReceiver` were reliably
+swallowed somewhere between delivery and `onReceive()` (confirmed live,
+repeatedly: the manifest's intent-filter registration checked out fine via
+`dumpsys package`, but the app process never spawned), while a direct
+`startservice` call reached the app every time. Confirmed working
+end-to-end against a real speaker: scan found it, `pair` completed a real
+bond (`BONDED`), and `list` correctly showed it afterward.
+
+Adapter enable/disable, listing bonded devices, disconnect, and remove
+don't need the app at all — adapter on/off uses real broadcast actions the
+stock `com.amazon.device.csmbluetooth.service` already exposes.
 
 The bonded-device list is filtered, not a raw dump: `bt_config.xml` also
 caches every device this Echo has ever merely *seen* during a scan — on a
@@ -135,12 +153,21 @@ real unit that's commonly hundreds of entries (neighbors' Echo Dots,
 passing phones, etc), none of them actual pairings. Confirmed live on a
 freshly-flashed unit: ~300 scan-cache entries, zero of them carrying any
 link-key material. Only a section with a `LinkKey`/`LE_KEY_*` tag counts as
-a real pairing here.
+a real pairing here — validated against both a scan-only entry (correctly
+excluded) and the real bonded speaker above (correctly included) after
+fixing an XML-nesting bug that initially made even the real pairing show up
+as empty.
 
 There's no per-device disconnect command on this Android version either —
 `disconnect` restarts the whole Bluetooth stack (`am force-stop
 com.android.bluetooth`), which drops everything currently connected and
 lets anything still paired/in range reconnect on its own afterward.
+
+Known gap: `ACTION_PAIRING_REQUEST` is logged but not auto-confirmed (that
+needs `BLUETOOTH_PRIVILEGED`, a signature\|privileged permission a normal
+sideloaded app can't hold). Every device tested so far paired without ever
+needing that confirmation, but a device that insists on PIN entry would
+need the app pushed to `/system/priv-app` instead — not attempted here.
 
 ## WiFi Credentials
 

@@ -537,12 +537,12 @@ modemmanager_menu() {
 # ---------------------------------------------------------------------------
 # Bluetooth manager
 # ---------------------------------------------------------------------------
-# This Android version has no scriptable pairing interface (no
-# bluetoothctl/cmd bluetooth) -- pairing a brand-new device still goes
-# through the normal Alexa app flow. What's covered here: adapter on/off,
-# viewing real bonded devices (filtered out of a much larger scan-cache
-# list -- see bluetooth-manager.sh's comments), disconnecting, and removing
-# a paired device.
+# This Android version has no built-in scriptable pairing interface (no
+# bluetoothctl/cmd bluetooth). Scan/pair here are driven by Jam's own tiny
+# headless companion app (bt-app/, jam-bt.apk) -- install it once (option 7)
+# before scan/pair will work. Everything else (adapter on/off, viewing real
+# bonded devices filtered out of a much larger scan-cache list, disconnect,
+# remove) works without the app.
 bluetooth_menu() {
     local script="$SCRIPT_DIR/bluetooth-manager.sh"
     while true; do
@@ -562,6 +562,9 @@ bluetooth_menu() {
         echo "  5) Disconnect (restarts the BT stack -- no per-device disconnect"
         echo "     command exists on this Android version)"
         echo "  6) Remove a paired device"
+        echo "  7) Install/reinstall the scan+pair companion app"
+        echo "  8) Scan for nearby devices (~12s)"
+        echo "  9) Pair with a device"
         echo "  0) Back"
         echo
         read_menu "#? "
@@ -574,6 +577,13 @@ bluetooth_menu() {
             6)
                 read -r -p "MAC address to remove (AA:BB:CC:DD:EE:FF): " BT_MAC
                 [[ -n "$BT_MAC" ]] && run_step "$script" remove "$BT_MAC"
+                pause
+                ;;
+            7) run_step "$script" install-app; pause ;;
+            8) run_step "$script" scan; pause ;;
+            9)
+                read -r -p "MAC address to pair with (AA:BB:CC:DD:EE:FF): " BT_MAC
+                [[ -n "$BT_MAC" ]] && run_step "$script" pair "$BT_MAC"
                 pause
                 ;;
             0|"") return ;;

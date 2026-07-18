@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.jam.bt"
+    android:versionCode="1"
+    android:versionName="1.0">
+
+    <uses-sdk android:minSdkVersion="22" android:targetSdkVersion="22" />
+
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+
+    <application android:label="JamBT" android:allowBackup="false">
+        <receiver android:name=".JamBtReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="com.jam.bt.SCAN" />
+                <action android:name="com.jam.bt.PAIR" />
+                <action android:name="com.jam.bt.CANCEL" />
+            </intent-filter>
+        </receiver>
+        <service android:name=".JamBtService" android:exported="false" />
+    </application>
+</manifest>
