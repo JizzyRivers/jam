@@ -286,15 +286,31 @@ do_pair() {
     adb_retry adb shell "am startservice -n $BT_PKG/.JamBtService -a $BT_PKG.PAIR --es mac $mac" \
         || die "could not start pairing after retries"
     sleep 8
-    local log result
+    local log result a2dp_result
     log=$(adb shell 'logcat -d -s JamBT:*' </dev/null | tr -d '\r')
     result=$(grep "BOND_STATE: $mac ->" <<<"$log" | tail -1 | sed -E 's/.*-> //')
+    a2dp_result=$(grep "A2DP_STATE: $mac ->" <<<"$log" | tail -1 | sed -E 's/.*-> //')
+    # An already-bonded device (re-pairing after a power cycle, say) never
+    # fires a new BOND_STATE_CHANGED -- the app connects A2DP directly in
+    # that case instead, so a successful outcome can show up as only an
+    # A2DP_STATE result with no BOND_STATE line at all. Check both.
+    if [[ "$a2dp_result" == "CONNECTED" ]]; then
+        green "Connected to $mac (audio profile is live)."
+    else
     case "$result" in
         BONDED)  green "Paired successfully with $mac." ;;
         BONDING) yellow "Still bonding -- check './bluetooth-manager.sh list' shortly, or a PIN/confirmation may be needed on the speaker itself." ;;
         NONE)    red "Pairing failed or was rejected by $mac." ;;
         *)       yellow "No definitive result yet -- check './bluetooth-manager.sh list' or the log:"; echo "$log" | grep -i "$mac\|PAIR" ;;
     esac
+    fi
+}
+
+do_play_test() {
+    require_app
+    adb_retry adb shell "am startservice -n $BT_PKG/.JamBtService -a $BT_PKG.PLAY_TEST" \
+        || die "could not start test playback after retries"
+    green "Playing the default notification sound -- listen for it on whichever device is currently the active audio route (check './bluetooth-manager.sh status' to see what that is)."
 }
 
 case "${1:-}" in
@@ -308,5 +324,6 @@ case "${1:-}" in
     install-app) do_install_app ;;
     scan)        do_scan ;;
     pair)        do_pair "${2:-}" ;;
-    *) die "usage: $0 {status|list|raw|enable|disable|disconnect|remove <MAC>|install-app|scan|pair <MAC>}" ;;
+    play-test)   do_play_test ;;
+    *) die "usage: $0 {status|list|raw|enable|disable|disconnect|remove <MAC>|install-app|scan|pair <MAC>|play-test}" ;;
 esac

@@ -143,6 +143,23 @@ repeatedly: the manifest's intent-filter registration checked out fine via
 end-to-end against a real speaker: scan found it, `pair` completed a real
 bond (`BONDED`), and `list` correctly showed it afterward.
 
+Bonding alone doesn't connect the audio profile — confirmed live,
+`dumpsys` showed `mCurrentDevice: null` under `Profile: A2dpService` right
+after a successful bond. `pair` now also connects A2DP afterward
+(`BluetoothA2dp.connect()`, a `@hide` method reached via reflection, fine
+on this pre-API-28 Android version), and handles the case where the device
+is already bonded from before (re-pairing after a power cycle, say) —
+`createBond()` won't fire a fresh state-change event then, so it connects
+A2DP directly instead of waiting on one. Confirmed live end-to-end: paired
+with a real speaker, actual voice responses audibly played through it.
+
+`play-test` plays Android's own default notification sound as a quick
+"is anything routed to this device" check without needing to actually talk
+to the Echo — but it uses the notification audio stream, which can be
+independently muted/very quiet compared to the stream real voice responses
+use, so a silent `play-test` doesn't necessarily mean the connection isn't
+working. Talking to the Echo directly is the more reliable test.
+
 Adapter enable/disable, listing bonded devices, disconnect, and remove
 don't need the app at all — adapter on/off uses real broadcast actions the
 stock `com.amazon.device.csmbluetooth.service` already exposes.

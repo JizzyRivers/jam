@@ -564,7 +564,9 @@ bluetooth_menu() {
         echo "  6) Remove a paired device"
         echo "  7) Install/reinstall the scan+pair companion app"
         echo "  8) Scan for nearby devices (~12s)"
-        echo "  9) Pair with a device"
+        echo "  9) Pair with a device (also connects audio)"
+        echo "  10) Play a test sound (notification stream -- talking to the"
+        echo "      Echo directly is a more reliable connectivity check)"
         echo "  0) Back"
         echo
         read_menu "#? "
@@ -586,6 +588,7 @@ bluetooth_menu() {
                 [[ -n "$BT_MAC" ]] && run_step "$script" pair "$BT_MAC"
                 pause
                 ;;
+            10) run_step "$script" play-test; pause ;;
             0|"") return ;;
             *) yellow "unrecognized option"; sleep 1 ;;
         esac
