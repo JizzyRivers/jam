@@ -498,6 +498,43 @@ health_check() {
 }
 
 # ---------------------------------------------------------------------------
+# ModemManager control (host-side -- this computer, not the Echo)
+# ---------------------------------------------------------------------------
+# ModemManager auto-probes USB devices that look like modems, including
+# things with a cdc_acm/serial-like interface -- which is exactly what shows
+# up during Amonet's BROM/Preloader stages and briefly during some reboots.
+# It's a candidate suspect any time adb/fastboot connectivity is flaky; this
+# menu makes it easy to check/rule it out without hunting for systemctl
+# incantations each time.
+modemmanager_menu() {
+    local script="$SCRIPT_DIR/modemmanager-toggle.sh"
+    while true; do
+        banner
+        bold "-- ModemManager control (host-side) --"
+        echo
+        if [[ -x "$script" ]]; then
+            "$script" status
+        else
+            red "Missing: $script"
+        fi
+        echo
+        echo "  1) Status"
+        echo "  2) Disable (stop + mask -- won't come back until re-enabled)"
+        echo "  3) Re-enable (unmask + start)"
+        echo "  0) Back"
+        echo
+        read_menu "#? "
+        case "$REPLY_CHOICE" in
+            1) run_step "$script" status; pause ;;
+            2) run_step "$script" disable; pause ;;
+            3) run_step "$script" enable; pause ;;
+            0|"") return ;;
+            *) yellow "unrecognized option"; sleep 1 ;;
+        esac
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Main menu
 # ---------------------------------------------------------------------------
 main_menu() {
@@ -528,7 +565,8 @@ main_menu() {
         echo "  7) WAN block: status"
         echo "  8) Quick health check"
         echo "  9) Fix flaky USB/adb connection (host-side)"
-        echo "  10) Quit"
+        echo "  10) ModemManager control (host-side, submenu)"
+        echo "  11) Quit"
         echo
         read_menu "#? "
         case "$REPLY_CHOICE" in
@@ -541,7 +579,8 @@ main_menu() {
             7) run_step "$SCRIPT_DIR/wan-block.sh" status; pause ;;
             8) health_check; pause ;;
             9) run_step "$SCRIPT_DIR/fix-adb-udev.sh"; pause ;;
-            10) echo "bye"; exit 0 ;;
+            10) modemmanager_menu ;;
+            11) echo "bye"; exit 0 ;;
             *) yellow "unrecognized option"; sleep 1 ;;
         esac
     done
