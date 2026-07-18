@@ -115,6 +115,33 @@ This script automates the whole thing safely:
 5. If Amazon explicitly denies the word (`UNAUTHORIZED`, not just a
    connectivity hiccup), automatically reverts to the previous wake word.
 
+## Bluetooth Manager
+
+```bash
+./bluetooth-manager.sh {status|list|raw|enable|disable|disconnect|remove <MAC>}
+```
+
+This Fire OS/Android version predates Android's scriptable Bluetooth
+interface (no `bluetoothctl`, no `cmd bluetooth`) — there's no shell command
+to drive a brand-new pairing handshake here, so pairing a new speaker still
+goes through the normal Alexa app flow. What this script covers instead:
+adapter enable/disable (real broadcast actions the stock
+`com.amazon.device.csmbluetooth.service` already exposes), listing devices
+actually bonded to this Echo, disconnecting, and removing a paired device.
+
+The bonded-device list is filtered, not a raw dump: `bt_config.xml` also
+caches every device this Echo has ever merely *seen* during a scan — on a
+real unit that's commonly hundreds of entries (neighbors' Echo Dots,
+passing phones, etc), none of them actual pairings. Confirmed live on a
+freshly-flashed unit: ~300 scan-cache entries, zero of them carrying any
+link-key material. Only a section with a `LinkKey`/`LE_KEY_*` tag counts as
+a real pairing here.
+
+There's no per-device disconnect command on this Android version either —
+`disconnect` restarts the whole Bluetooth stack (`am force-stop
+com.android.bluetooth`), which drops everything currently connected and
+lets anything still paired/in range reconnect on its own afterward.
+
 ## WiFi Credentials
 
 ```bash

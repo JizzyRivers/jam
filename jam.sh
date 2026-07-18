@@ -535,6 +535,54 @@ modemmanager_menu() {
 }
 
 # ---------------------------------------------------------------------------
+# Bluetooth manager
+# ---------------------------------------------------------------------------
+# This Android version has no scriptable pairing interface (no
+# bluetoothctl/cmd bluetooth) -- pairing a brand-new device still goes
+# through the normal Alexa app flow. What's covered here: adapter on/off,
+# viewing real bonded devices (filtered out of a much larger scan-cache
+# list -- see bluetooth-manager.sh's comments), disconnecting, and removing
+# a paired device.
+bluetooth_menu() {
+    local script="$SCRIPT_DIR/bluetooth-manager.sh"
+    while true; do
+        banner
+        bold "-- Bluetooth manager --"
+        echo
+        if [[ -x "$script" ]]; then
+            "$script" status
+        else
+            red "Missing: $script"
+        fi
+        echo
+        echo "  1) Status"
+        echo "  2) List paired devices"
+        echo "  3) Enable adapter"
+        echo "  4) Disable adapter"
+        echo "  5) Disconnect (restarts the BT stack -- no per-device disconnect"
+        echo "     command exists on this Android version)"
+        echo "  6) Remove a paired device"
+        echo "  0) Back"
+        echo
+        read_menu "#? "
+        case "$REPLY_CHOICE" in
+            1) run_step "$script" status; pause ;;
+            2) run_step "$script" list; pause ;;
+            3) run_step "$script" enable; pause ;;
+            4) run_step "$script" disable; pause ;;
+            5) run_step "$script" disconnect; pause ;;
+            6)
+                read -r -p "MAC address to remove (AA:BB:CC:DD:EE:FF): " BT_MAC
+                [[ -n "$BT_MAC" ]] && run_step "$script" remove "$BT_MAC"
+                pause
+                ;;
+            0|"") return ;;
+            *) yellow "unrecognized option"; sleep 1 ;;
+        esac
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Main menu
 # ---------------------------------------------------------------------------
 main_menu() {
@@ -566,7 +614,8 @@ main_menu() {
         echo "  8) Quick health check"
         echo "  9) Fix flaky USB/adb connection (host-side)"
         echo "  10) ModemManager control (host-side, submenu)"
-        echo "  11) Quit"
+        echo "  11) Bluetooth manager (submenu)"
+        echo "  12) Quit"
         echo
         read_menu "#? "
         case "$REPLY_CHOICE" in
@@ -580,7 +629,8 @@ main_menu() {
             8) health_check; pause ;;
             9) run_step "$SCRIPT_DIR/fix-adb-udev.sh"; pause ;;
             10) modemmanager_menu ;;
-            11) echo "bye"; exit 0 ;;
+            11) bluetooth_menu ;;
+            12) echo "bye"; exit 0 ;;
             *) yellow "unrecognized option"; sleep 1 ;;
         esac
     done
