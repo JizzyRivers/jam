@@ -200,17 +200,36 @@ force a fresh read. Since `adb` runs over USB here, changing WiFi never risks
 losing the connection to the device itself. A timestamped backup of the
 previous config is kept on-device before writing the new one.
 
-## Fix Flaky USB/adb (host-side)
+## Fix Flaky USB/adb
 
-```bash
-./fix-adb-udev.sh
-```
+`./jam.sh` -> option 8 ("Fix flaky USB/adb connection") is a submenu with
+two independent fixes for the same symptom -- adb connects for a few
+seconds, drops, then reconnects on repeat. Try the on-device fix first;
+fall back to the host-side one if that doesn't clear it up.
 
-If `adb` connects for a few seconds, drops, then reconnects on repeat --
-but the same cable/port is rock solid in TWRP -- this is usually your
-computer's `libmtp` udev rules grabbing the device and knocking it out of
-ADB mode. Unlike every other Jam script, this one runs **on your computer**,
-not the Echo -- it doesn't touch adb/the device at all.
+### On-device fix
+
+The Echo's own USB mode can keep cycling through MTP, which re-enumerates
+the adb interface out from under the connection -- visible as a changing
+`transport_id` and repeated USB enumeration in the Echo's kernel log. The
+submenu applies `adb shell setprop sys.usb.config adb` as a temporary fix,
+and optionally `persist.sys.usb.config`/`persist.sys.usb.state` (plus a
+reboot) to make it stick.
+
+Setting the `persist.*` properties can be denied on this build when the
+device is normally booted. If that happens, boot to TWRP (Amonet submenu,
+option 7) and set the same two properties from an ADBX console there
+instead -- see the XDA Forums thread linked from
+[issue #2](https://github.com/JizzyRivers/jam/issues/2) for the full
+writeup.
+
+### Host-side fix (`fix-adb-udev.sh`)
+
+If the on-device fix doesn't help, and the same cable/port is rock solid in
+TWRP, this is usually your computer's `libmtp` udev rules grabbing the
+device and knocking it out of ADB mode. Unlike every other Jam script, this
+one runs **on your computer**, not the Echo -- it doesn't touch adb/the
+device at all.
 
 It walks you through `lsusb` to find the Echo's vendor:product ID (this
 varies per device/host, so you pick the right line), then adds an explicit

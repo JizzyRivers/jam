@@ -623,6 +623,72 @@ wan_block_menu() {
 }
 
 # ---------------------------------------------------------------------------
+# Fix flaky USB/adb connection
+# ---------------------------------------------------------------------------
+# Two independent causes produce the same symptom (adb connects for a few
+# seconds, drops, reconnects, repeat): the HOST's libmtp udev rules grabbing
+# the device (fix-adb-udev.sh, unchanged below), or the ECHO's own USB mode
+# cycling through MTP, which re-enumerates the adb interface out from under
+# it -- visible as a changing transport_id and repeated enumeration in dmesg.
+# Reported in https://github.com/JizzyRivers/jam/issues/2.
+usb_fix_menu() {
+    while true; do
+        banner
+        bold "-- Fix flaky USB/adb connection --"
+        echo
+        echo "  1) On-device fix: disable MTP mode on the Echo (often the actual"
+        echo "     cause -- try this first)"
+        echo "  2) Host-side fix: exclude the Echo from your computer's libmtp"
+        echo "     udev rules"
+        echo "  0) Back"
+        echo
+        read_menu "#? "
+        case "$REPLY_CHOICE" in
+            1)
+                echo
+                bold "Disabling MTP mode on the Echo (USB config -> plain adb only):"
+                yellow "Symptom this fixes: adb connects for a few seconds, drops, and"
+                yellow "reconnects on repeat, with a changing transport_id and repeated USB"
+                yellow "enumeration in the Echo's own kernel log -- caused by the device's"
+                yellow "USB mode cycling through MTP."
+                echo
+                if check_adb; then
+                    echo "Applying temporary fix (lasts until next reboot)..."
+                    if adb shell "setprop sys.usb.config adb" </dev/null; then
+                        green "Done. USB config is now 'adb' only."
+                    else
+                        red "Failed to set sys.usb.config."
+                    fi
+                    echo
+                    read -r -p "Also make this persist across reboots? [y/N] " ans
+                    if [[ "$ans" =~ ^[Yy] ]]; then
+                        PERSIST_OK=1
+                        adb shell "setprop persist.sys.usb.config adb" </dev/null || PERSIST_OK=0
+                        adb shell "setprop persist.sys.usb.state adb" </dev/null || PERSIST_OK=0
+                        if [[ "$PERSIST_OK" -eq 1 ]]; then
+                            green "Persistent properties set."
+                            read -r -p "Reboot now for it to take full effect? [y/N] " reb
+                            [[ "$reb" =~ ^[Yy] ]] && adb reboot </dev/null
+                        else
+                            red "Setting the persist.* properties was denied."
+                            yellow "Known restriction on this build: persist properties can't be"
+                            yellow "written from a normally-booted OS. Workaround: boot to TWRP"
+                            yellow "(Amonet submenu, option 7) and set the same two properties from"
+                            yellow "an ADBX console there instead. See the XDA thread linked in the"
+                            yellow "README for the full writeup."
+                        fi
+                    fi
+                fi
+                pause
+                ;;
+            2) run_step "$SCRIPT_DIR/fix-adb-udev.sh"; pause ;;
+            0|"") return ;;
+            *) yellow "unrecognized option"; sleep 1 ;;
+        esac
+    done
+}
+
+# ---------------------------------------------------------------------------
 # Main menu
 # ---------------------------------------------------------------------------
 main_menu() {
@@ -660,7 +726,7 @@ main_menu() {
         echo "  7) Quick health check"
         echo
         bold "  Host-side troubleshooting"
-        echo "  8) Fix flaky USB/adb connection"
+        echo "  8) Fix flaky USB/adb connection (submenu)"
         echo "  9) ModemManager control (submenu)"
         echo
         echo "  10) Quit"
@@ -674,7 +740,7 @@ main_menu() {
             5) bluetooth_menu ;;
             6) wan_block_menu ;;
             7) health_check; pause ;;
-            8) run_step "$SCRIPT_DIR/fix-adb-udev.sh"; pause ;;
+            8) usb_fix_menu ;;
             9) modemmanager_menu ;;
             10) echo "bye"; exit 0 ;;
             *) yellow "unrecognized option"; sleep 1 ;;
